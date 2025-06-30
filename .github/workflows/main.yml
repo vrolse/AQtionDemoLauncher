@@ -1,0 +1,45 @@
+name: Build and Release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+  packages: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore .\AQtionDemoLauncher.csproj
+
+      - name: Write appsettings.json from secret
+        run: Set-Content -Path appsettings.json -Value "$env:APPSETTINGS_JSON"
+        env:
+          APPSETTINGS_JSON: ${{ secrets.APPSETTINGS_JSON }}
+
+      - name: Publish
+        run: dotnet publish .\AQtionDemoLauncher.csproj -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true -o publish
+
+      - name: Zip output (exclude .pdb, appsettings.json, icon.ico; include README.md)
+        run: |
+          Copy-Item README.md publish\README.md
+          $exclude = @('AQtionDemoLauncher.pdb', 'appsettings.json', 'icon.ico')
+          $files = Get-ChildItem -Path publish -File | Where-Object { $exclude -notcontains $_.Name }
+          $zipName = "AQtionDemoLauncher-win-x64-${{ github.ref_name }}.zip"
+          Compress-Archive -Path $files.FullName -DestinationPath $zipName
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AQtionDemoLauncher-win-x64-${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
