@@ -30,7 +30,7 @@ namespace AQtionDemoLauncher
         private readonly string mapZipUrlPattern;
         private readonly string s3BucketRoot;
         private readonly string updateApiUrl;
-        private readonly string currentVersionString = "1.0.0"; // Use your current version string here
+        private readonly string currentVersionString = GetCurrentVersionString(); // Use your current version string here
 
         // The current folder URL being browsed in the demo list
         private string currentFolderUrl = string.Empty;
@@ -1174,7 +1174,26 @@ namespace AQtionDemoLauncher
                             MessageBoxIcon.Information);
                         if (result == DialogResult.Yes && !string.IsNullOrEmpty(url))
                         {
-                            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                            // Find the ZIP asset in the release
+                            var assets = release.GetProperty("assets");
+                            string? zipUrl = null;
+                            foreach (var asset in assets.EnumerateArray())
+                            {
+                                var name = asset.GetProperty("name").GetString();
+                                if (name != null && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    zipUrl = asset.GetProperty("browser_download_url").GetString();
+                                    break;
+                                }
+                            }
+                            if (!string.IsNullOrEmpty(zipUrl))
+                            {
+                                await DownloadAndUpdateAsync(zipUrl, Path.GetFileName(Application.ExecutablePath));
+                            }
+                            else
+                            {
+                                MessageBox.Show("Could not find a ZIP asset in the latest release.", "Update Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
                         }
                     }
                 }
@@ -1183,6 +1202,103 @@ namespace AQtionDemoLauncher
             {
                 // Optional: log or ignore if no connection or error
             }
+        }
+
+        private async Task DownloadAndUpdateAsync(string zipUrl, string exeName)
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "AQtionDemoLauncherUpdate");
+            Directory.CreateDirectory(tempDir);
+            string zipPath = Path.Combine(tempDir, "update.zip");
+
+            try
+            {
+                // Download the zip
+                using (var client = new HttpClient())
+                using (var response = await client.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    response.EnsureSuccessStatusCode();
+                    using (var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write))
+                    {
+                        await response.Content.CopyToAsync(fs);
+                    }
+                }
+
+                // Extract the new EXE
+                string extractedExePath = Path.Combine(tempDir, exeName);
+                using (var archive = System.IO.Compression.ZipFile.OpenRead(zipPath))
+                {
+                    var exeEntry = archive.Entries.FirstOrDefault(e => e.Name.Equals(exeName, StringComparison.OrdinalIgnoreCase));
+                    if (exeEntry == null)
+                    {
+                        MessageBox.Show("Update failed: EXE not found in ZIP.", "Update Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    exeEntry.ExtractToFile(extractedExePath, true);
+                }
+
+                // Create a batch file to replace the EXE and restart
+                string currentExe = Application.ExecutablePath;
+                string updaterBat = Path.Combine(tempDir, "update.bat");
+                File.WriteAllText(updaterBat, $@"
+@echo off
+setlocal
+set TMPDIR=""{tempDir}""
+set NEWEXE=""{extractedExePath}""
+set ZIP=""{zipPath}""
+
+:loop
+tasklist | find /i ""{Path.GetFileName(currentExe)}"" >nul 2>&1
+if not errorlevel 1 (
+    timeout /t 1 >nul
+    goto loop
+)
+
+copy /y %NEWEXE% ""{currentExe}""
+if errorlevel 1 (
+    echo ERROR: Failed to copy new EXE.
+    pause
+    goto cleanup
+)
+
+start """" ""{currentExe}""
+
+:cleanup
+del /f /q %NEWEXE%
+del /f /q %ZIP%
+cd %TMPDIR%
+cd ..
+rmdir /s /q %TMPDIR%
+if exist %TMPDIR% (
+    echo WARNING: Could not remove temp directory: %TMPDIR%
+    pause
+)
+del ""%~f0""
+");
+
+                // Start the batch file and exit
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = updaterBat,
+                    UseShellExecute = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Update failed: {ex.Message}", "Update Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // Optional: clean up temp files here if needed
+            }
+        }
+
+        private static string GetCurrentVersionString()
+        {
+            var ver = typeof(Form1).Assembly.GetName().Version?.ToString();
+            // Or, for informational version (supports pre-release tags):
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            var attr = (System.Reflection.AssemblyInformationalVersionAttribute?)Attribute.GetCustomAttribute(
+                assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute));
+            return attr?.InformationalVersion ?? ver ?? "unknown";
         }
     }
 }
