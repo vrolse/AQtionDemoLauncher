@@ -54,7 +54,9 @@ jobs:
           
           $zipName = "AQtionDemoLauncher-win-x64-${{ github.ref_name }}.zip"
           
-          # Compress only the selected files
+          # Save zipName to environment variable so it can be used in later steps
+          echo "zipName=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          
           Compress-Archive -Path $files.FullName -DestinationPath $zipName
 
       - name: Create Release
