@@ -14,6 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -26,20 +27,39 @@ jobs:
         env:
           APPSETTINGS_JSON: ${{ secrets.APPSETTINGS_JSON }}
 
+      - name: Set VERSION without leading v
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          # Remove leading 'v' if present
+          if ($tag.StartsWith('v')) {
+            $tag = $tag.Substring(1)
+          }
+          # Validate that version is non-empty and matches SemVer
+          if (!$tag) {
+            Write-Error "Tag is empty or invalid"
+            exit 1
+          }
+          echo "VERSION=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Publish
-        run: dotnet publish .\AQtionDemoLauncher.csproj -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:Version=${{ github.ref_name }} -o publish
+        run: dotnet publish .\AQtionDemoLauncher.csproj -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:Version=${{ env.VERSION }} -o publish
 
       - name: Zip output (exclude .pdb, appsettings.json, icon.ico; include README.md)
         run: |
           Copy-Item README.md publish\README.md
+          
           $exclude = @('AQtionDemoLauncher.pdb', 'appsettings.json', 'icon.ico')
           $files = Get-ChildItem -Path publish -File | Where-Object { $exclude -notcontains $_.Name }
+          
           $zipName = "AQtionDemoLauncher-win-x64-${{ github.ref_name }}.zip"
+          
+          # Compress only the selected files
           Compress-Archive -Path $files.FullName -DestinationPath $zipName
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: AQtionDemoLauncher-win-x64-${{ github.ref_name }}.zip
+          files: ${{ env.zipName }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
