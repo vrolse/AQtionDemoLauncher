@@ -352,9 +352,11 @@ namespace AQtionDemoLauncher
         private async Task<bool> EnsureMapPresentAsync(string mapName)
         {
             string actionDir = Path.Combine(q2proDir, "action");
+            string mapsDir = Path.Combine(actionDir, "maps");
+            string bspPath = Path.Combine(mapsDir, $"{mapName}.bsp");
             string pkzPath = Path.Combine(actionDir, $"{mapName}.pkz");
-            // If .pkz already exists, no need to download
-            if (File.Exists(pkzPath))
+            // If .bsp already exists, no need to download
+            if (File.Exists(bspPath))
                 return true;
             // Download the zip and rename to pkz
             string zipUrl = string.Format(mapZipUrlPattern, mapName);
@@ -457,7 +459,7 @@ namespace AQtionDemoLauncher
                     string localPath = Path.Combine(demoDownloadRoot, fileNameOnly);
                     string visual = File.Exists(localPath) ? "✓ " + fileNameOnly : fileNameOnly;
                     demoListBox.Items.Add(visual);
-                    demoMap[visual] = file;
+                    demoMap[fileNameOnly] = file;
                     allDemoDisplayNames.Add(visual);
                 }
                 // NEW: update allDemoDisplayNames and apply filter
@@ -713,11 +715,8 @@ namespace AQtionDemoLauncher
             if (string.IsNullOrEmpty(selected) || selected.StartsWith("[DIR] "))
                 return;
 
-            // Remove "★ " and "✓ " prefixes if present
-            if (selected.StartsWith("★ "))
-                selected = selected.Substring(2);
-            if (selected.StartsWith("✓ "))
-                selected = selected.Substring(2);
+            // Remove "✓ " prefixes if present
+            selected = selected.StartsWith("✓ ") ? selected.Substring(2) : selected;
 
             if (!demoMap.TryGetValue(selected, out var fileName))
             {
