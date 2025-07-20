@@ -12,7 +12,7 @@ using HtmlAgilityPack;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.Compression;
-using NuGet.Versioning; // Add this at the top of your file
+using NuGet.Versioning;
 
 namespace AQtionDemoLauncher
 {
@@ -59,8 +59,8 @@ namespace AQtionDemoLauncher
         private List<string> allDemoDisplayNames = new();
         // Local folder where downloaded demos are stored (relative to q2pro.exe)
         private string demoDownloadRoot = string.Empty;
-        private string currentDemoSourceUrl = "";
-        private string rootDemoUrl = "";
+        private string currentDemoSourceUrl = string.Empty;
+        private string rootDemoUrl = string.Empty;
 
         // Sort order flag
         private bool sortDescending = false;
@@ -117,9 +117,15 @@ namespace AQtionDemoLauncher
 
             InitializeComponent();
 
-            // Set window icon if available
-            // if (File.Exists("icon.ico"))
-            //     this.Icon = new Icon("icon.ico");
+            // Set window icon from embedded resource
+            try
+            {
+                var asm = typeof(Form1).Assembly;
+                using var iconStream = asm.GetManifestResourceStream("AQtionDemoLauncher.icon.ico");
+                if (iconStream != null)
+                    this.Icon = new Icon(iconStream);
+            }
+            catch { /* ignore icon errors */ }
 
             // Apply Quake 2 themed colors/fonts to the UI
             ApplyQuake2Theme();
@@ -191,7 +197,6 @@ namespace AQtionDemoLauncher
             copyUrlItem.Click += (s, e) => CopyDemoUrlForSelectedItem();
             demoContextMenu.Items.Add(copyUrlItem);
             demoListBox.ContextMenuStrip = demoContextMenu;
-            demoContextMenu.Items.Add(copyUrlItem);
 
             // --- Q2PRO Download Button ---
             downloadQ2proButton.Text = "Download";
@@ -364,16 +369,19 @@ namespace AQtionDemoLauncher
             try
             {
                 using (HttpClient client = new())
-                using (var response = await client.GetAsync(zipUrl))
                 {
-                    if (!response.IsSuccessStatusCode)
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("AQtionDemoLauncher"); 
+                    using (var response = await client.GetAsync(zipUrl))
                     {
-                        statusLabel.Text = $"Map package for {mapName} not found.";
-                        return false;
-                    }
-                    using (var fs = new FileStream(tempZipPath, FileMode.Create, FileAccess.Write))
-                    {
-                        await response.Content.CopyToAsync(fs);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            statusLabel.Text = $"Map package for {mapName} not found.";
+                            return false;
+                        }
+                        using (var fs = new FileStream(tempZipPath, FileMode.Create, FileAccess.Write))
+                        {
+                            await response.Content.CopyToAsync(fs);
+                        }
                     }
                 }
                 // Rename zip to pkz
@@ -409,7 +417,13 @@ namespace AQtionDemoLauncher
                 statusLabel.Text = "Fetching demos...";
                 demoListBox.Items.Clear();
                 demoMap.Clear();
+                allDemoDisplayNames.Clear();
                 var web = new HtmlWeb();
+                web.PreRequest += request =>
+                {
+                    request.Headers["User-Agent"] = "AQtionDemoLauncher";
+                    return true;
+                };
                 var doc = await Task.Run(() => web.Load(folderUrl));
                 var links = doc.DocumentNode.SelectNodes("//a[@href]")
                     ?.Select(n => n.GetAttributeValue("href", ""))
@@ -460,9 +474,8 @@ namespace AQtionDemoLauncher
                     string visual = File.Exists(localPath) ? "✓ " + fileNameOnly : fileNameOnly;
                     demoListBox.Items.Add(visual);
                     demoMap[fileNameOnly] = file;
-                    allDemoDisplayNames.Add(visual);
                 }
-                // NEW: update allDemoDisplayNames and apply filter
+                // After populating demoListBox, update allDemoDisplayNames:
                 allDemoDisplayNames = demoListBox.Items.Cast<string>().ToList();
                 UpdateBreadcrumb(currentFolderUrl);
 
@@ -562,6 +575,7 @@ namespace AQtionDemoLauncher
             statusLabel.Text = "Fetching S3 demos...";
             demoListBox.Items.Clear();
             demoMap.Clear();
+            allDemoDisplayNames.Clear();
 
             string bucketRoot = s3BucketRoot;
             string prefix = url.Replace(bucketRoot, "").Trim('/');
@@ -812,6 +826,7 @@ namespace AQtionDemoLauncher
         private async Task DownloadFileWithProgressAsync(string url, string destinationFilePath)
         {
             using HttpClient client = new();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("AQtionDemoLauncher"); 
             using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
 

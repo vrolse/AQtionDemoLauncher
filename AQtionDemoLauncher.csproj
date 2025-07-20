@@ -14,5 +14,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="appsettings.json" />
+    <EmbeddedResource Include="icon.ico" />
   </ItemGroup>
 </Project>
